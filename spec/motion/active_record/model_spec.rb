@@ -33,6 +33,7 @@ describe "Active Record - Model" do
       @person.cars.each { |car| car.class.should.equal Car }
     end
 
+
   end
 
   describe "finders" do
@@ -42,8 +43,8 @@ describe "Active Record - Model" do
         Person.find("name == 'John' AND surname == 'Doe'")
         Person.where("name == 'John' AND surname == 'Doe'")
 
-        Person.find( { name: 'John', surname: 'Doe' } )
-        Person.where( { name: 'John', surname: 'Doe' } )
+        Person.find(name: 'John', surname: 'Doe')
+        Person.where(name: 'John', surname: 'Doe')
       }
       finders.should.not.raise NoMethodError
     end
@@ -73,7 +74,7 @@ describe "Active Record - Model" do
   describe "attributes" do
     
     before do
-      @person = Person.create({ name: @unique_name, surname: @unique_surname, is_member: true, age: 22 })
+      @person = Person.create(name: @unique_name, surname: @unique_surname, is_member: true, age: 22)
     end
 
     after do
@@ -96,7 +97,7 @@ describe "Active Record - Model" do
       @person.is_member.should.equal false
 
       @person.save
-      Person.find({ surname: @unique_surname }).is_member.should.equal false
+      Person.find(surname: @unique_surname).is_member.should.equal false
     end
 
     it "knows how to handle numbers" do
@@ -105,7 +106,7 @@ describe "Active Record - Model" do
       @person.age.should.equal 33
 
       @person.save
-      Person.find({ surname: @unique_surname }).age.should.equal 33
+      Person.find(surname: @unique_surname).age.should.equal 33
     end
 
   end
