@@ -1,5 +1,5 @@
 describe "Active Record - Model" do
-  
+
   class Person < BW::Model
     has_many :cars
   end
@@ -7,6 +7,12 @@ describe "Active Record - Model" do
   class Car < BW::Model
     belongs_to :person
   end
+  
+  before do
+    @unique_name = 'efAEWFEWAfiuhwefb'
+    @unique_surname = 'ewjfew3aWxcEWfse'
+  end
+
 
   describe "creation" do
     
@@ -22,7 +28,9 @@ describe "Active Record - Model" do
       @person.name.should.equal @name
       @person.surname.should.equal @surname
       @person.age.should.equal @age
-      @person.cars.should.equal @cars
+      @person.cars.class.should.equal Array
+      @person.cars.size.should.equal 3
+      @person.cars.each { |car| car.class.should.equal Car }
     end
 
   end
@@ -43,12 +51,7 @@ describe "Active Record - Model" do
   end
 
   describe "saving / deleting" do
-    
-    before do
-      @unique_name = 'efAEWFEWAfiuhwefb'
-      @unique_surname = 'ewjfew3aWxcEWfse'
-    end
-
+  
     it "saves the object to the database" do
       person = Person.create(name: @unique_name, surname: @unique_surname)
       person.save
@@ -65,6 +68,48 @@ describe "Active Record - Model" do
       Person.where(name: @unique_name, surname: @unique_surname).should.equal nil
     end
 
+  end
+
+  describe "attributes" do
+    
+    before do
+      @person = Person.create( { name: @unique_name, surname: @unique_surname, is_member: true } )
+    end
+
+    after do
+      @person.delete
+    end
+
+    it "updates the modified attributes in database when saved" do
+      person = Person.find(surname: @unique_surname)
+      person.name.should.equal @unique_name
+
+      person.name = 'marin'
+      person.name.should.equal 'marin'
+      person.save
+
+      modified_person = Person.find(surname: @unique_surname)
+      modified_person.name.should.equal 'marin'
+    end
+
+    it "knows how to handle booleans" do
+      Person.find(surname: @unique_surname)
+      person.is_member.should.equal true
+      person.is_member = false
+      person.save
+
+      person.is_member.should.equal false
+
+    end
+
+  end
+
+  describe "relationships" do
+
+  end
+
+  describe "validators" do
+    
   end
 
 end
