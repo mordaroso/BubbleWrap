@@ -2,6 +2,7 @@ describe "Active Record - Model" do
 
   class Person < BW::Model
     has_many :cars
+    validates_presence_of [:name, :surname]
   end
 
   class Car < BW::Model
@@ -33,6 +34,12 @@ describe "Active Record - Model" do
       @person.cars.each { |car| car.class.should.equal Car }
     end
 
+    it "doesn't create the object in database until it's saved" do
+      numbah = Person.all.size
+      Person.create
+      Person.new
+      Person.all.size.shoud.equal numbah
+    end
 
   end
 
@@ -40,6 +47,7 @@ describe "Active Record - Model" do
     
     it "handles both strings and hash arguments" do
       finders = -> {
+        Person.all
         Person.find("name == 'John' AND surname == 'Doe'")
         Person.where("name == 'John' AND surname == 'Doe'")
 
@@ -116,7 +124,18 @@ describe "Active Record - Model" do
   end
 
   describe "validators" do
+
+    class SampleModel < BW::Model
+      validates_presence_of :name
+      validates_uniqueness_of :model_id
+
+      # Take a look at the Rails validations page:
+      # http://guides.rubyonrails.org/active_record_validations_callbacks.html
+      # What do you think about them?
+
+    end
     
+
   end
 
 end
