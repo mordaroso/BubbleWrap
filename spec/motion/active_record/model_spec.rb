@@ -73,7 +73,7 @@ describe "Active Record - Model" do
   describe "attributes" do
     
     before do
-      @person = Person.create( { name: @unique_name, surname: @unique_surname, is_member: true } )
+      @person = Person.create({ name: @unique_name, surname: @unique_surname, is_member: true, age: 22 })
     end
 
     after do
@@ -81,25 +81,31 @@ describe "Active Record - Model" do
     end
 
     it "updates the modified attributes in database when saved" do
-      person = Person.find(surname: @unique_surname)
-      person.name.should.equal @unique_name
-
-      person.name = 'marin'
-      person.name.should.equal 'marin'
-      person.save
+      @person.name.should.equal @unique_name
+      @person.name = 'marin'
+      @person.name.should.equal 'marin'
+      @person.save
 
       modified_person = Person.find(surname: @unique_surname)
       modified_person.name.should.equal 'marin'
     end
 
     it "knows how to handle booleans" do
-      Person.find(surname: @unique_surname)
-      person.is_member.should.equal true
-      person.is_member = false
-      person.save
+      @person.is_member.should.equal true
+      @person.is_member = false
+      @person.is_member.should.equal false
 
-      person.is_member.should.equal false
+      @person.save
+      Person.find({ surname: @unique_surname }).is_member.should.equal false
+    end
 
+    it "knows how to handle numbers" do
+      @person.age.should.equal 22
+      @person.age = 33
+      @person.age.should.equal 33
+
+      @person.save
+      Person.find({ surname: @unique_surname }).age.should.equal 33
     end
 
   end
