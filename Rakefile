@@ -4,6 +4,7 @@ require 'motion/project'
 Bundler.setup
 Bundler.require
 
+require 'bubble-wrap/all'
 require 'bubble-wrap/test'
 
 Motion::Project::App.setup do |app|
@@ -21,4 +22,3 @@ namespace :spec do
 
   task :all => [:lib, :motion]
 end
-

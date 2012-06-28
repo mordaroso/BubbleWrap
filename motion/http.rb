@@ -106,72 +106,31 @@ module BubbleWrap
       # :headers<Hash>     - headers send with the request
       # Anything else will be available via the options attribute reader.
       #
-      def initialize(url, http_method = :get, options={})
+      def initialize(url_string, http_method = :get, options={})
         @method = http_method.upcase.to_s
         @delegator = options.delete(:action) || self
         @payload = options.delete(:payload)
+        convert_payload_to_params if @payload.is_a?(Hash)
+        #not tested
+        @files = options.delete(:files)
+        @boundary = options.delete(:boundary) || BW.create_uuid unless @files.nil?
+        #
         @credentials = options.delete(:credentials) || {}
         @credentials = {:username => '', :password => ''}.merge(@credentials)
         @timeout = options.delete(:timeout) || 30.0
         @headers = escape_line_feeds(options.delete :headers)
+        @headers = {"Content-Type" => "multipart/form-data; boundary=#{@boundary}"} if @files && @headers.nil?
         @cache_policy = options.delete(:cache_policy) || NSURLRequestUseProtocolCachePolicy
         @options = options
         @response = HTTP::Response.new
-        initiate_request(url)
-        connection.start
-        UIApplication.sharedApplication.networkActivityIndicatorVisible = true
-        connection
-      end
-
-      def generate_params(payload, prefix=nil)
-        list = []
-        payload.each do |k,v|
-          if v.is_a?(Hash)
-            new_prefix = prefix ? "#{prefix}[#{k.to_s}]" : k.to_s
-            param = generate_params(v, new_prefix)
-            list << param
-          elsif v.is_a?(Array)
-            v.each do |val|
-              param = prefix ? "#{prefix}[#{k}][]=#{val}" : "#{k}[]=#{val}"
-              list << param
-            end
-          else
-            param = prefix ? "#{prefix}[#{k}]=#{v}" : "#{k}=#{v}"
-            list << param
-          end
-        end
-        return list.flatten
-      end
-
-      def initiate_request(url_string)
-        # http://developer.apple.com/documentation/Cocoa/Reference/Foundation/Classes/nsrunloop_Class/Reference/Reference.html#//apple_ref/doc/constant_group/Run_Loop_Modes
-        # NSConnectionReplyMode
         
-        unless @payload.nil?
-          if @payload.is_a?(Hash)
-            params   = generate_params(@payload)
-            @payload = params.join("&")
-          end
-          url_string = "#{url_string}?#{@payload}" if @method == "GET"
-        end
-        #this method needs a refactor when the specs are done. (especially this utf8 escaping part)
-        log "BubbleWrap::HTTP building a NSRequest for #{url_string}"
-        @url = NSURL.URLWithString(url_string.stringByAddingPercentEscapesUsingEncoding NSUTF8StringEncoding)
-        @request = NSMutableURLRequest.requestWithURL(@url,
-                                                      cachePolicy:@cache_policy,
-                                                      timeoutInterval:@timeout)
-        @request.setHTTPMethod @method
-        @request.setAllHTTPHeaderFields(@headers) if @headers
-
-        # @payload needs to be converted to data
-        unless @method == "GET" || @payload.nil?
-          @payload = @payload.to_s.dataUsingEncoding(NSUTF8StringEncoding)
-          @request.setHTTPBody @payload
-        end
-
-        # NSHTTPCookieStorage.sharedHTTPCookieStorage
+        @url = create_url(url_string)
+        @body = create_request_body
+        @request = create_request
         @connection = create_connection(request, self)
-        patch_nsurl_request
+        @connection.start
+
+        UIApplication.sharedApplication.networkActivityIndicatorVisible = true
       end
 
       def connection(connection, didReceiveResponse:response)
@@ -184,6 +143,10 @@ module BubbleWrap
       def connection(connection, didReceiveData:received_data)
         @received_data ||= NSMutableData.new
         @received_data.appendData(received_data)
+
+        if download_progress = options[:download_progress]
+          download_progress.call(@received_data.length.to_f, response_size)
+        end
       end
 
       def connection(connection, willSendRequest:request, redirectResponse:redirect_response)
@@ -197,19 +160,23 @@ module BubbleWrap
       end
 
       def connection(connection, didFailWithError: error)
+        log "HTTP Connection failed #{error.localizedDescription}"
         UIApplication.sharedApplication.networkActivityIndicatorVisible = false
         @request.done_loading!
-        log "HTTP Connection failed #{error.localizedDescription}"
         @response.error_message = error.localizedDescription
         call_delegator_with_response
       end
 
+      def connection(connection, didSendBodyData:sending, totalBytesWritten:written, totalBytesExpectedToWrite:expected)
+        if upload_progress = options[:upload_progress]
+          upload_progress.call(sending, written, expected)
+        end
+      end
 
       # The transfer is done and everything went well
       def connectionDidFinishLoading(connection)
         UIApplication.sharedApplication.networkActivityIndicatorVisible = false
         @request.done_loading!
-        # copy the data in a local var that we will attach to the response object
         response_body = NSData.dataWithData(@received_data) if @received_data
         @response.update(status_code: status_code, body: response_body, headers: response_headers, url: @url)
 
@@ -236,6 +203,85 @@ module BubbleWrap
 
       private
 
+      def create_request
+        log "BubbleWrap::HTTP building a NSRequest for #{@url.description}"
+
+        request = NSMutableURLRequest.requestWithURL(@url,
+                                                      cachePolicy:@cache_policy,
+                                                      timeoutInterval:@timeout)
+        request.setHTTPMethod(@method)
+        request.setAllHTTPHeaderFields(@headers)
+        request.setHTTPBody(@body)
+        patch_nsurl_request(request)
+
+        request
+      end
+
+      def create_request_body
+        return nil if @method == "GET"
+        return nil unless (@payload || @files)
+        body = NSMutableData.data
+
+        append_payload(body) if @payload
+        append_files(body) if @files
+        
+        body.appendData("\r\n--#{@boundary}--\r\n".dataUsingEncoding NSUTF8StringEncoding) if @files
+        body
+      end
+
+      def append_payload(body)
+        if @payload.is_a?(NSData)
+          body.appendData(@payload)
+        else
+          body.appendData(@payload.to_s.dataUsingEncoding NSUTF8StringEncoding)
+        end
+      end
+
+      def append_files(body)
+        @files.each do |key, value|
+          postData = NSMutableData.data
+          s = "\r\n--#{@boundary}\r\n"
+          s += "Content-Disposition: form-data; name=\"#{key}\"; filename=\"#{key}\"\r\n"
+          s += "Content-Type: application/octet-stream\r\n\r\n"
+          postData.appendData(s.dataUsingEncoding NSUTF8StringEncoding)
+          postData.appendData(NSData.dataWithData(value))
+          postData.appendData("\r\n--#{@boundary}\r\n".dataUsingEncoding NSUTF8StringEncoding) unless key == @files.keys.last
+          body.appendData(postData)
+        end
+      end
+
+      def create_url(url_string)
+        if @method == "GET" && @payload
+          url_string += "?#{@payload}"
+        end
+        NSURL.URLWithString(url_string.stringByAddingPercentEscapesUsingEncoding NSUTF8StringEncoding)
+      end
+
+      def convert_payload_to_params
+        params_array = generate_params(@payload)
+        @payload = params_array.join("&")
+      end
+
+      def generate_params(payload, prefix=nil)
+        list = []
+        payload.each do |k,v|
+          if v.is_a?(Hash)
+            new_prefix = prefix ? "#{prefix}[#{k.to_s}]" : k.to_s
+            param = generate_params(v, new_prefix)
+            list << param
+          elsif v.is_a?(Array)
+            v.each do |val|
+              param = prefix ? "#{prefix}[#{k}][]=#{val}" : "#{k}[]=#{val}"
+              list << param
+            end
+          else
+            param = prefix ? "#{prefix}[#{k}]=#{v}" : "#{k}=#{v}"
+            list << param
+          end
+        end
+        return list.flatten
+      end
+
       def log(message)
         NSLog message if SETTINGS[:debug]
       end
@@ -248,11 +294,11 @@ module BubbleWrap
         escaped_hash
       end
 
-      def patch_nsurl_request
-        @request.instance_variable_set("@done_loading", false)
+      def patch_nsurl_request(request)
+        request.instance_variable_set("@done_loading", false)
         
-        def @request.done_loading; @done_loading; end
-        def @request.done_loading!; @done_loading = true; end
+        def request.done_loading; @done_loading; end
+        def request.done_loading!; @done_loading = true; end
       end
 
       def call_delegator_with_response
@@ -265,6 +311,7 @@ module BubbleWrap
       def create_connection(request, delegate)
         NSURLConnection.connectionWithRequest(request, delegate:delegate)
       end
+
     end
   end
 end

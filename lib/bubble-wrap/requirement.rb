@@ -57,6 +57,7 @@ module BubbleWrap
         Dir.glob(File.expand_path(file_spec, root)).each do |file|
           p = new(file,root)
           self.paths[p.relative] = p
+          p.depends_on('motion/shortcut.rb') unless p.relative == 'motion/shortcut.rb'
         end
         self.class_eval(&block) if block
       end
@@ -65,8 +66,14 @@ module BubbleWrap
         paths.fetch(relative)
       end
 
-      def files
-        paths.values.map(&:to_s)
+      def files(app_files=nil)
+        files = paths.values.map(&:to_s)
+        files += app_files if app_files
+        files.uniq
+      end
+
+      def clear!
+        paths.select! { |k,v| v.relative == 'motion/shortcut.rb' }
       end
 
       def files_dependencies
@@ -77,9 +84,10 @@ module BubbleWrap
         deps
       end
 
-      def frameworks
+      def frameworks(app_frameworks=nil)
         frameworks = ['UIKit', 'Foundation', 'CoreGraphics'] +
           paths.values.map(&:frameworks)
+        frameworks += app_frameworks if app_frameworks
         frameworks.flatten.compact.sort.uniq
       end
 

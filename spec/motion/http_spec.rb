@@ -39,19 +39,19 @@ describe "HTTP" do
       end 
     end
 
-    [:get, :post, :put, :delete, :head, :patch].each do |verb|
-      it "has access to the proper response scope for #{verb} request" do
-        class WatchedObj; attr_accessor :test_value end
-        @watched_object = WatchedObj.new
-        @name = 'Matt'
-        query = BubbleWrap::HTTP.send(verb, @localhost_url) do |response|
-          @watched_object.test_value = @name
-        end
-        wait_for_change(@watched_object, 'test_value') do
-          @watched_object.test_value.should == 'Matt'
-        end
-      end
-    end
+    # [:get, :post, :put, :delete, :head, :patch].each do |verb|
+    #   it "has access to the proper response scope for #{verb} request" do
+    #     class WatchedObj; attr_accessor :test_value end
+    #     @watched_object = WatchedObj.new
+    #     @name = 'Matt'
+    #     query = BubbleWrap::HTTP.send(verb, @localhost_url) do |response|
+    #       @watched_object.test_value = @name
+    #     end
+    #     wait_for_change(@watched_object, 'test_value') do
+    #       @watched_object.test_value.should == 'Matt'
+    #     end
+    #   end
+    # end
 
   end
 
@@ -69,19 +69,19 @@ describe "HTTP" do
     it "says OK status code 20x" do
       @response.ok?.should.equal true
       (200..209).each do |code|
-        BubbleWrap::HTTP::Response.new({status_code: code}).ok?.should.be.true
+        BubbleWrap::HTTP::Response.new(status_code: code).ok?.should.be.true
       end
       [100..101, 300..307, 400..417, 500..505].inject([]){|codes, rg| codes += rg.to_a}.each do |code|
-        BubbleWrap::HTTP::Response.new({status_code: code}).ok?.should.be.false
+        BubbleWrap::HTTP::Response.new(status_code: code).ok?.should.be.false
       end
     end
 
     it "updates ivars when calling update" do
-      @response.update( { one: 'one', two: 'two' } )
+      @response.update(one: 'one', two: 'two')
       @response.instance_variable_get(:@one).should.equal 'one'
       @response.instance_variable_get(:@two).should.equal 'two'
 
-      @response.update( { one: 'three', two: 'four' } )
+      @response.update(one: 'three', two: 'four')
       @response.instance_variable_get(:@one).should.equal 'three'
       @response.instance_variable_get(:@two).should.equal 'four'
     end
@@ -111,7 +111,13 @@ describe "HTTP" do
       @cache_policy = 24234
       @leftover_option = 'trololo'
       @headers = { 'User-Agent' => "Mozilla/5.0 (X11; Linux x86_64; rv:12.0) \n Gecko/20100101 Firefox/12.0" }
-      @options = {  action: @action, 
+      @files = {
+        fake_file: NSJSONSerialization.dataWithJSONObject({ fake: 'json' }, options:0, error:nil), 
+        empty_file: NSMutableData.data
+      }
+      @options = {  
+        action: @action, 
+        files: @files,
         payload: @payload, 
         credentials: @credentials, 
         headers: @headers, 
@@ -163,10 +169,64 @@ describe "HTTP" do
         options.should.be.empty
       end
 
-      it "should set payload from options{} to @payload" do
-        payload = "user[name]=marin&user[surname]=usalj&twitter=@mneorr&website=mneorr.com&values[]=apple&values[]=orange&values[]=peach&credentials[username]=mneorr&credentials[password]=123456xx!@crazy"
-        @query.instance_variable_get(:@payload).should.equal payload
-        @options.should.not.has_key? :payload
+      describe "PAYLOAD / UPLOAD FILES" do
+
+        def create_query(payload, files)
+          BubbleWrap::HTTP::Query.new( '', :post, { payload: payload, files: files } )
+        end
+
+        def sample_data
+          NSData.dataWithBytesNoCopy(Pointer.new(:char, 'abc'), length:24)
+        end
+
+        it "should set payload from options{} to @payload" do
+          payload = "user[name]=marin&user[surname]=usalj&twitter=@mneorr&website=mneorr.com&values[]=apple&values[]=orange&values[]=peach&credentials[username]=mneorr&credentials[password]=123456xx!@crazy"
+          @query.instance_variable_get(:@payload).should.equal payload
+          @options.should.not.has_key? :payload
+        end
+        
+        it "should check if @payload is a hash before generating params" do
+          query_string_payload = BubbleWrap::HTTP::Query.new( 'nil' , :get,  { payload: "name=apple&model=macbook"} )
+          query_string_payload.instance_variable_get(:@payload).should.equal 'name=apple&model=macbook'
+        end
+
+        it "should check if payload is nil" do
+          lambda{ 
+            BubbleWrap::HTTP::Query.new( 'nil' , :post, {} ) 
+          }.should.not.raise NoMethodError        
+        end      
+
+        it "should set the payload in URL only for GET request" do
+          [:post, :put, :delete, :head, :patch].each do |method|
+            query = BubbleWrap::HTTP::Query.new( @localhost_url , method, { payload: @payload } )
+            query.instance_variable_get(:@url).description.should.equal @localhost_url
+          end  
+
+          get = BubbleWrap::HTTP::Query.new( @localhost_url , :get, { payload: 'name=marin' } )
+          get.instance_variable_get(:@url).description.should.equal "#{@localhost_url}?name=marin"
+        end
+
+        it "sets the payload without conversion to-from NSString if the payload was NSData" do
+          data = sample_data
+          query = create_query(data, nil)
+          query.request.HTTPBody.should.equal data
+        end
+
+        it "wraps the files in boundary if files were given" do
+          payload = { fake_name: 'arnold', surname: 'schwarzenegger' }
+          files = { sample_file: sample_data }
+          query = create_query(payload, files)
+          uuid = query.instance_variable_get(:@boundary)
+
+          expected_data_s = "fake_name=arnold&surname=schwarzenegger\r\n--#{uuid}\r\nContent-Disposition: form-data; name=\"sample_file\"; filename=\"sample_file\"\r\nContent-Type: application/octet-stream\r\n\r\n#{sample_data.to_str}\r\n--#{uuid}--\r\n"
+
+          query.request.HTTPBody.to_str.should.equal expected_data_s
+        end
+
+        it "should or shouldn't wrap the POST Payload in boundary?" do
+          true.should.equal true
+        end
+
       end
 
       it "should set default timeout to 30s or the one from hash" do
@@ -206,6 +266,10 @@ describe "HTTP" do
         @query.instance_variable_get(:@url).description.should.equal processed_url
       end
 
+      it "should pass the new request in the new connection" do
+        @query.connection.request.URL.description.should.equal @query.request.URL.description
+      end
+
       it "should start the connection" do
         @query.connection.was_started.should.equal true
       end
@@ -216,48 +280,26 @@ describe "HTTP" do
 
     end
 
-    describe "initiate request" do
+    describe "create request" do
 
       before do
         @url_string = 'http://initiated-request.dev/to convert'
-        @payload = { name: 'apple', model: 'macbook'}
         @headers = { fake: 'headers' }
-        @get_query = BubbleWrap::HTTP::Query.new( @url_string , :get,  { headers: @headers, payload: @payload } )
-        @get_query.initiate_request @url_string
+        @get_query = BubbleWrap::HTTP::Query.new( @url_string , :get,  { headers: @headers } )
       end
 
-      it "should check if @payload is a hash before generating params" do
-        @get_query.instance_variable_get(:@payload).should.equal 'name=apple&model=macbook'
-
-        query_string_payload = BubbleWrap::HTTP::Query.new( 'nil' , :get,  { payload: "name=apple&model=macbook"} )
-        query_string_payload.instance_variable_get(:@payload).should.equal 'name=apple&model=macbook'
-      end
-
-      it "should check if payload is nil" do
-        nil_payload = BubbleWrap::HTTP::Query.new( 'nil' , :post, {} )
-        lambda{ nil_payload.initiate_request('fake') }.should.not.raise NoMethodError        
-      end      
-
-      it "should set the payload in URL only for GET request" do
-        [:post, :put, :delete, :head, :patch].each do |method|
-          query = BubbleWrap::HTTP::Query.new( @localhost_url , method, { payload: @payload } )
-          query.instance_variable_get(:@url).description.should.equal @localhost_url
-        end  
-      end
-
+   
       it "sets the HTTPBody DATA to @request for all methods except GET" do
-
+        payload = { name: 'apple', model: 'macbook'}
         [:post, :put, :delete, :head, :patch].each do |method|
-          query = BubbleWrap::HTTP::Query.new( 'nil' , method, { payload: @payload } )
+          query = BubbleWrap::HTTP::Query.new( 'nil' , method, { payload: payload } )
           real_payload = NSString.alloc.initWithData(query.request.HTTPBody, encoding:NSUTF8StringEncoding)
-
           real_payload.should.equal 'name=apple&model=macbook'
         end
 
-      end
-
-      it "should add UTF8 escaping on the URL string" do
-        @get_query.instance_variable_get(:@url).description.should.equal 'http://initiated-request.dev/to%20convert?name=apple&model=macbook'
+        get = BubbleWrap::HTTP::Query.new( 'nil' , :get, { payload: payload } )
+        get_payload = NSString.alloc.initWithData(get.request.HTTPBody, encoding:NSUTF8StringEncoding)
+        get_payload.should.be.empty
       end
 
       it "should create a new request with HTTP method & header fields" do
@@ -267,10 +309,6 @@ describe "HTTP" do
 
       it "creates a new NSURLConnection and sets itself as a delegate" do
         @query.connection.delegate.should.equal @query
-      end
-
-      it "should pass the new request in the new connection" do
-        @query.connection.request.URL.description.should.equal @query.request.URL.description
       end
 
       it "should patch the NSURLRequest with done_loading and done_loading!" do
@@ -303,7 +341,7 @@ describe "HTTP" do
           "credentials[username]=mneorr", 
           "credentials[password]=123456xx!@crazy"
         ]
-        @query.generate_params(@payload).should.equal expected_params
+        @query.send(:generate_params, @payload).should.equal expected_params
       end
 
     end
