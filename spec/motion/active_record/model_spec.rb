@@ -1,12 +1,15 @@
 describe "Active Record - Model" do
 
-  class Person < BW::Model
-    has_many :cars
-    validates_presence_of [:name, :surname]
+  DATABASE_NAME = 'Database'
+
+
+  class Person < NSManagedObject
+  #   has_many :cars
+  #   validates_presence_of [:name, :surname]
   end
 
-  class Car < BW::Model
-    belongs_to :person
+  class Car < NSManagedObject
+  #   belongs_to :person
   end
   
   before do
@@ -79,63 +82,66 @@ describe "Active Record - Model" do
 
   end
 
-  describe "attributes" do
+  # BELOW ARE THE COMMENTED OUT SPECS THAT WERE WRITTEN FOR OUR CUSTOM AR IMPLEMENTATION.
+  # FOR NOW WE'LL BE USING CORE DATA.
+
+  # describe "attributes" do
     
-    before do
-      @person = Person.create(name: @unique_name, surname: @unique_surname, is_member: true, age: 22)
-    end
+  #   before do
+  #     @person = Person.create(name: @unique_name, surname: @unique_surname, is_member: true, age: 22)
+  #   end
 
-    after do
-      @person.delete
-    end
+  #   after do
+  #     @person.delete
+  #   end
 
-    it "updates the modified attributes in database when saved" do
-      @person.name.should.equal @unique_name
-      @person.name = 'marin'
-      @person.name.should.equal 'marin'
-      @person.save
+  #   it "updates the modified attributes in database when saved" do
+  #     @person.name.should.equal @unique_name
+  #     @person.name = 'marin'
+  #     @person.name.should.equal 'marin'
+  #     @person.save
 
-      modified_person = Person.find(surname: @unique_surname)
-      modified_person.name.should.equal 'marin'
-    end
+  #     modified_person = Person.find(surname: @unique_surname)
+  #     modified_person.name.should.equal 'marin'
+  #   end
 
-    it "knows how to handle booleans" do
-      @person.is_member.should.equal true
-      @person.is_member = false
-      @person.is_member.should.equal false
+  #   it "knows how to handle booleans" do
+  #     @person.is_member.should.equal true
+  #     @person.is_member = false
+  #     @person.is_member.should.equal false
 
-      @person.save
-      Person.find(surname: @unique_surname).is_member.should.equal false
-    end
+  #     @person.save
+  #     Person.find(surname: @unique_surname).is_member.should.equal false
+  #   end
 
-    it "knows how to handle numbers" do
-      @person.age.should.equal 22
-      @person.age = 33
-      @person.age.should.equal 33
+  #   it "knows how to handle numbers" do
+  #     @person.age.should.equal 22
+  #     @person.age = 33
+  #     @person.age.should.equal 33
 
-      @person.save
-      Person.find(surname: @unique_surname).age.should.equal 33
-    end
+  #     @person.save
+  #     Person.find(surname: @unique_surname).age.should.equal 33
+  #   end
 
-  end
+  # end
 
-  describe "relationships" do
+  # describe "relationships" do
 
-  end
+  # end
 
-  describe "validators" do
+  # describe "validators" do
 
-    class SampleModel < BW::Model
-      validates_presence_of :name
-      validates_uniqueness_of :model_id
+  #   class SampleModel < BW::Model
+  #     validates_presence_of :name
+  #     validates_uniqueness_of :model_id
 
-      # Take a look at the Rails validations page:
-      # http://guides.rubyonrails.org/active_record_validations_callbacks.html
-      # What do you think about them?
+  #     # Take a look at the Rails validations page:
+  #     # http://guides.rubyonrails.org/active_record_validations_callbacks.html
+  #     # What do you think about them?
 
-    end
+  #   end
     
 
-  end
+  # end
 
 end
