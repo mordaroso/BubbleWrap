@@ -53,6 +53,18 @@ If you wish to only include the UI-related wrappers:
 require 'bubble-wrap/ui'
 ```
 
+If you wish to only include the `Camera` wrapper:
+
+```ruby
+require 'bubble-wrap/camera'
+```
+
+If you wish to only include the `Location` wrapper:
+
+```ruby
+require 'bubble-wrap/location'
+```
+
 If you want to include everything (ie kitchen sink mode) you can save time and do:
 
 ```ruby
@@ -79,6 +91,44 @@ use the versioned gem.
 
 
 ## Core
+
+### Misc
+
+UUID generator:
+```ruby
+BubbleWrap.create_uuid
+=> "68ED21DB-82E5-4A56-ABEB-73650C0DB701"
+```
+
+Localization (using `NSBundle.mainBundle.localizedStringForKey`):
+```ruby
+BubbleWrap.localized_string(:foo, 'fallback')
+=> "fallback"
+```
+
+Color conversion:
+```ruby
+BubbleWrap.rgba_color(23, 45, 12, 0.4)
+=> #<UIDeviceRGBColor:0x6db6ed0>
+BubbleWrap.rgb_color(23, 45, 12)
+=> #<UIDeviceRGBColor:0x8ca88b0>
+'blue'.to_color
+=> #<UICachedDeviceRGBColor:0xda535c0>
+'dark_gray'.to_color
+=> #<UICachedDeviceWhiteColor:0x8bb5be0>
+'#FF8A19'.to_color
+=> #<UIDeviceRGBColor:0x8d54110>
+```
+
+Debug flag:
+```ruby
+BubbleWrap.debug?
+=> false
+BubbleWrap.debug = true
+=> true
+BubbleWrap.debug?
+=> true
+```
 
 ### App
 
@@ -146,6 +196,27 @@ Examples:
 # 320
 ```
 
+### Camera
+
+Added interface for better camera access:
+
+```ruby
+# Uses the front camera
+BW::Device.camera.front.picture(media_types: [:movie, :image]) do |result|
+  image_view = UIImageView.alloc.initWithImage(result[:original_image])
+end
+
+# Uses the rear camera
+BW::Device.camera.rear.picture(media_types: [:movie, :image]) do |result|
+  image_view = UIImageView.alloc.initWithImage(result[:original_image])
+end
+
+# Uses the photo library
+BW::Device.camera.any.picture(media_types: [:movie, :image]) do |result|
+  image_view = UIImageView.alloc.initWithImage(result[:original_image])
+end
+```
+
 ### JSON
 
 `BubbleWrap::JSON` wraps `NSJSONSerialization` available in iOS5 and offers the same API as Ruby's JSON std lib.
@@ -169,22 +240,22 @@ Helper methods to give NSNotificationCenter a Ruby-like interface:
 
 ```ruby
 def viewWillAppear(animated)
-  @foreground_observer = notification_center.observe UIApplicationWillEnterForegroundNotification do |notification|
+  @foreground_observer = App.notification_center.observe UIApplicationWillEnterForegroundNotification do |notification|
     loadAndRefresh
   end
   
-  @reload_observer = notification_center.observe ReloadNotification do |notification|
+  @reload_observer = App.notification_center.observe ReloadNotification do |notification|
     loadAndRefresh
   end
 end
 
 def viewWillDisappear(animated)
-  notification_center.unobserve @foreground_observer
-  notification_center.unobserve @reload_observer
+  App.notification_center.unobserve @foreground_observer
+  App.notification_center.unobserve @reload_observer
 end
 
 def reload
-  notification_center.post ReloadNotification
+  App.notification_center.post ReloadNotification
 end
 ```
 
@@ -220,13 +291,13 @@ class ExampleViewController < UIViewController
 	@label.text = ""
 	view.addSubview @label
 	
-    observe(@label, "text") do |old_value, new_value|
+    observe(@label, :text) do |old_value, new_value|
       puts "Hello from viewDidLoad!"
     end
   end
 
   def viewDidAppear(animated)
-    observe(@label, "text") do |old_value, new_value|
+    observe(@label, :text) do |old_value, new_value|
       puts "Hello from viewDidAppear!"
     end
   end
@@ -257,15 +328,18 @@ iso8601 formatted string into a Time instance.
 => 2012-05-31 21:41:33 +0200
 ```
 
-### Camera
+## Location
 
-Added interface for better camera access:
+Added interface for Ruby-like GPS access:
 
 ```ruby
-BW::Camera.picture(source_type: :camera, media_types: [:movie, :image]) do |result|
-  image_view = UIImageView.alloc.initWithImage(result[:original_image])
+BW::Location.get do |result|
+  p "From Lat #{result[:from].latitude}, Long #{result[:from].longitude}"
+  p "To Lat #{result[:to].latitude}, Long #{result[:to].longitude}"
 end
 ```
+
+Also available is `BW::Location.get_significant`, for monitoring significant location changes.
 
 ## UI
 
@@ -337,6 +411,12 @@ BubbleWrap::HTTP.post("http://foo.bar.com/", {payload: data}) do |response|
   end
 end
 ```
+
+A `:download_progress` option can also be passed. The expected object
+would be a Proc that takes two arguments: a float representing the
+amount of data currently received and another float representing the
+total amount of data expected.
+
 
 ## RSS Parser
 **Since: > version 1.0.0**

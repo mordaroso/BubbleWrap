@@ -1,7 +1,7 @@
-describe "KVOHelper" do
+describe BubbleWrap::KVO do
 
   class KvoExample
-    include BW::KVO
+    include BubbleWrap::KVO
 
     attr_accessor :label
     attr_accessor :items
@@ -16,15 +16,15 @@ describe "KVOHelper" do
     # Test helper
 
     def observe_label(&block)
-      observe(@label, "text", &block)
+      observe(@label, :text, &block)
     end
 
     def observe_collection(&block)
-      observe(self, "items", &block)
+      observe(self, :items, &block)
     end
 
     def unobserve_label
-      unobserve(@label, "text")
+      unobserve(@label, :text)
     end
 
     #  def unobserve_all
@@ -33,7 +33,6 @@ describe "KVOHelper" do
     #end
 
   end
-
 
   describe "Callbacks" do
     before do

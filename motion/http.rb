@@ -1,7 +1,5 @@
 module BubbleWrap
 
-  SETTINGS = {}
-
   # The HTTP module provides a simple interface to make HTTP requests.
   #
   # TODO: preflight support, easier/better cookie support, better error handling
@@ -21,38 +19,38 @@ module BubbleWrap
     #   end
     #
     def self.get(url, options={}, &block)
-      create_query url, :get, options, block
+      options[:action] = block if block_given?
+      HTTP::Query.new(url, :get, options)
     end
-    
+
     # Make a POST request
     def self.post(url, options={}, &block)
-      create_query url, :post, options, block
+      options[:action] = block if block_given?
+      HTTP::Query.new(url, :post, options)
     end
-    
+
     # Make a PUT request
     def self.put(url, options={}, &block)
-      create_query url, :put, options, block
+      options[:action] = block if block_given?
+      HTTP::Query.new(url, :put, options)
     end
-    
+
     # Make a DELETE request
     def self.delete(url, options={}, &block)
-      create_query url, :delete, options, block
+      options[:action] = block if block_given?
+      HTTP::Query.new(url, :delete, options)
     end
 
     # Make a HEAD request
     def self.head(url, options={}, &block)
-      create_query url, :head, options, block
+      options[:action] = block if block_given?
+      HTTP::Query.new(url, :head, options)
     end
 
     # Make a PATCH request
     def self.patch(url, options={}, &block)
-      create_query url, :patch, options, block
-    end
-
-    private
-    def self.create_query(url, method, options, passed_block)
-      options[:action] = passed_block if passed_block
-      HTTP::Query.new( url, method, options )
+      options[:action] = block if block_given?
+      HTTP::Query.new(url, :patch, options)
     end
 
     # Response class wrapping the results of a Query's response
@@ -75,6 +73,11 @@ module BubbleWrap
       def ok?
         status_code.to_s =~ /20\d/ ? true : false
       end
+
+      def to_s
+        "#<#{self.class}:#{self.object_id} - url: #{self.url}, body: #{self.body}, headers: #{self.headers}, status code: #{self.status_code}, error message: #{self.error_message} >"
+      end
+      alias description to_s
 
     end
 
@@ -110,28 +113,32 @@ module BubbleWrap
         @method = http_method.upcase.to_s
         @delegator = options.delete(:action) || self
         @payload = options.delete(:payload)
-        convert_payload_to_params if @payload.is_a?(Hash)
-        #not tested
         @files = options.delete(:files)
-        @boundary = options.delete(:boundary) || BW.create_uuid unless @files.nil?
-        #
+        @boundary = options.delete(:boundary) || BW.create_uuid
         @credentials = options.delete(:credentials) || {}
         @credentials = {:username => '', :password => ''}.merge(@credentials)
         @timeout = options.delete(:timeout) || 30.0
         @headers = escape_line_feeds(options.delete :headers)
-        @headers = {"Content-Type" => "multipart/form-data; boundary=#{@boundary}"} if @files && @headers.nil?
+        @format = options.delete(:format)
         @cache_policy = options.delete(:cache_policy) || NSURLRequestUseProtocolCachePolicy
         @options = options
         @response = HTTP::Response.new
-        
+
         @url = create_url(url_string)
         @body = create_request_body
         @request = create_request
+        set_content_type
         @connection = create_connection(request, self)
         @connection.start
 
         UIApplication.sharedApplication.networkActivityIndicatorVisible = true
       end
+
+      def to_s
+        "#<#{self.class}:#{self.object_id} - Method: #{@method}, url: #{@url.description}, body: #{@body.description}, Payload: #{@payload}, Headers: #{@headers} Credentials: #{@credentials}, Timeout: #{@timeout}, \
+Cache policy: #{@cache_policy}, response: #{@response.inspect} >"
+      end
+      alias description to_s
 
       def connection(connection, didReceiveResponse:response)
         @status_code = response.statusCode
@@ -150,7 +157,9 @@ module BubbleWrap
       end
 
       def connection(connection, willSendRequest:request, redirectResponse:redirect_response)
-        log "HTTP redirected #{request.description}"
+        @redirection ||= 0
+        @redirection += 1
+        log "##{@redirection} HTTP redirection: #{request} - #{self.description}"
         new_request = request.mutableCopy
         # new_request.setValue(@credentials.inspect, forHTTPHeaderField:'Authorization') # disabled while we figure this one out
         new_request.setAllHTTPHeaderFields(@headers) if @headers
@@ -173,7 +182,6 @@ module BubbleWrap
         end
       end
 
-      # The transfer is done and everything went well
       def connectionDidFinishLoading(connection)
         UIApplication.sharedApplication.networkActivityIndicatorVisible = false
         @request.done_loading!
@@ -184,16 +192,10 @@ module BubbleWrap
       end
 
       def connection(connection, didReceiveAuthenticationChallenge:challenge)
-
         if (challenge.previousFailureCount == 0)
-          # by default we are keeping the credential for the entire session
-          # Eventually, it would be good to let the user pick one of the 3 possible credential persistence options:
-          # NSURLCredentialPersistenceNone,
-          # NSURLCredentialPersistenceForSession,
-          # NSURLCredentialPersistencePermanent
-          log "auth challenged, answered with credentials: #{credentials.inspect}"
           new_credential = NSURLCredential.credentialWithUser(credentials[:username], password:credentials[:password], persistence:NSURLCredentialPersistenceForSession)
           challenge.sender.useCredential(new_credential, forAuthenticationChallenge:challenge)
+          log "auth challenged, answered with credentials: #{credentials.inspect}"
         else
           challenge.sender.cancelAuthenticationChallenge(challenge)
           log 'Auth Failed :('
@@ -218,85 +220,135 @@ module BubbleWrap
       end
 
       def create_request_body
-        return nil if @method == "GET"
+        return nil if (@method == "GET" || @method == "HEAD")
         return nil unless (@payload || @files)
+
         body = NSMutableData.data
 
         append_payload(body) if @payload
         append_files(body) if @files
-        
-        body.appendData("\r\n--#{@boundary}--\r\n".dataUsingEncoding NSUTF8StringEncoding) if @files
+        append_body_boundary(body) if @set_body_to_close_boundary
+
+        log "Built HTTP body: \n #{body.to_str}"
         body
+      end
+
+      def set_content_type
+        # if no headers provided, set content-type automatically
+        if @headers.nil? || !@headers.keys.find {|k| k.downcase == 'content-type'}
+          @headers ||= {}
+          @headers["Content-Type"] = case @format
+          when :json
+            "application/json"
+          when :xml
+            "application/xml"
+          when :text
+            "text/plain"
+          else
+            if @format == :form_data || @set_body_to_close_boundary
+              "multipart/form-data; boundary=#{@boundary}"
+            else
+             "application/x-www-form-urlencoded"
+            end
+          end
+        end
       end
 
       def append_payload(body)
         if @payload.is_a?(NSData)
           body.appendData(@payload)
         else
-          body.appendData(@payload.to_s.dataUsingEncoding NSUTF8StringEncoding)
+          append_form_params(body)
         end
+        body
+      end
+
+      def append_form_params(body)
+        # puts "*** append_form #{@payload}"
+        if @payload.is_a?(String)
+          body.appendData(@payload.dataUsingEncoding NSUTF8StringEncoding)
+        else
+          list = process_payload_hash(@payload)
+          list.each do |key, value|
+            form_data = NSMutableData.new
+            s = "\r\n--#{@boundary}\r\n"
+            s += "Content-Disposition: form-data; name=\"#{key}\"\r\n\r\n"
+            s += value.to_s
+            form_data.appendData(s.dataUsingEncoding NSUTF8StringEncoding)
+            body.appendData(form_data)
+          end
+          @set_body_to_close_boundary = true
+        end
+        body
       end
 
       def append_files(body)
         @files.each do |key, value|
-          postData = NSMutableData.data
+          file_data = NSMutableData.new
           s = "\r\n--#{@boundary}\r\n"
           s += "Content-Disposition: form-data; name=\"#{key}\"; filename=\"#{key}\"\r\n"
           s += "Content-Type: application/octet-stream\r\n\r\n"
-          postData.appendData(s.dataUsingEncoding NSUTF8StringEncoding)
-          postData.appendData(NSData.dataWithData(value))
-          postData.appendData("\r\n--#{@boundary}\r\n".dataUsingEncoding NSUTF8StringEncoding) unless key == @files.keys.last
-          body.appendData(postData)
+          file_data.appendData(s.dataUsingEncoding NSUTF8StringEncoding)
+          file_data.appendData(value)
+          body.appendData(file_data)
         end
+        @set_body_to_close_boundary = true
+        body
+      end
+
+      def append_body_boundary(body)
+        body.appendData("\r\n--#{@boundary}--\r\n".dataUsingEncoding NSUTF8StringEncoding)
       end
 
       def create_url(url_string)
-        if @method == "GET" && @payload
+        if (@method == "GET" || @method == "HEAD") && @payload
+          convert_payload_to_url if @payload.is_a?(Hash)
           url_string += "?#{@payload}"
         end
         NSURL.URLWithString(url_string.stringByAddingPercentEscapesUsingEncoding NSUTF8StringEncoding)
       end
 
-      def convert_payload_to_params
-        params_array = generate_params(@payload)
+      def convert_payload_to_url
+        params_array = process_payload_hash(@payload)
+        params_array.map! { |key, value| "#{key}=#{value}" }
         @payload = params_array.join("&")
       end
 
-      def generate_params(payload, prefix=nil)
+      def process_payload_hash(payload, prefix=nil)
         list = []
         payload.each do |k,v|
           if v.is_a?(Hash)
             new_prefix = prefix ? "#{prefix}[#{k.to_s}]" : k.to_s
-            param = generate_params(v, new_prefix)
-            list << param
+            param = process_payload_hash(v, new_prefix)
+            list += param
           elsif v.is_a?(Array)
             v.each do |val|
-              param = prefix ? "#{prefix}[#{k}][]=#{val}" : "#{k}[]=#{val}"
-              list << param
+              param = prefix ? "#{prefix}[#{k.to_s}][]" : "#{k.to_s}[]"
+              list << [param, val]
             end
           else
-            param = prefix ? "#{prefix}[#{k}]=#{v}" : "#{k}=#{v}"
-            list << param
+            param = prefix ? "#{prefix}[#{k.to_s}]" : k.to_s
+            list << [param, v]
           end
         end
-        return list.flatten
+        list
       end
 
       def log(message)
-        NSLog message if SETTINGS[:debug]
+        NSLog message if BubbleWrap.debug?
       end
 
       def escape_line_feeds(hash)
         return nil if hash.nil?
         escaped_hash = {}
-        
+
         hash.each{|k,v| escaped_hash[k] = v.gsub("\n", '\\n') }
         escaped_hash
       end
 
       def patch_nsurl_request(request)
         request.instance_variable_set("@done_loading", false)
-        
+
         def request.done_loading; @done_loading; end
         def request.done_loading!; @done_loading = true; end
       end
